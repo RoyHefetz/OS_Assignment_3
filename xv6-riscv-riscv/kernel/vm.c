@@ -169,12 +169,10 @@ uint64 map_shared_pages(struct proc* src_proc, struct proc* dst_proc, uint64 src
 {
   if (size == 0) return 0;
 
-    // Step 1: Align source address to page boundaries
     uint64 src_start = PGROUNDDOWN(src_va);
     uint64 src_end = PGROUNDUP(src_va + size);
     uint64 num_pages = (src_end - src_start) / PGSIZE;
 
-    // Step 2: Decide where to map in destination
     uint64 dst_start = PGROUNDUP(dst_proc->sz);  // start from the end of dst address space
     uint64 dst_va = dst_start;
 
@@ -196,14 +194,34 @@ uint64 map_shared_pages(struct proc* src_proc, struct proc* dst_proc, uint64 src
         dst_va += PGSIZE;
     }
 
-    // Step 3: Update destination process size
     dst_proc->sz = dst_start + num_pages * PGSIZE;
 
-    // Step 4: Return dst virtual address with the correct offset
     uint64 offset = src_va - src_start;
-    return dst_start + offset;
+    return dst_start + offset; // returns destination va with offset
 }
 
+uint64 
+unmap_shared_pages(struct proc* p, uint64 addr, uint64 size) {
+   
+  if (size == 0) // if there's no memory to unmap
+    return -1;
+
+  uint64 offset = addr % PGSIZE;
+  uint64 start_va = PGROUNDDOWN(addr);
+  uint64 npages = PGROUNDUP(size + offset) / PGSIZE;
+
+  for (uint64 i = 0; i < npages; i++) {
+    pte_t *pte = walk(p->pagetable, start_va + i*PGSIZE, 0);
+    if (!pte || (*pte & PTE_V) == 0 || (*pte & PTE_S) == 0)
+      return -1; // either unmapped or not a shared mapping
+  }
+
+  uvmunmap(p->pagetable, start_va, npages, 1);
+
+  p->sz = start_va;
+
+  return 0;
+}
 
 // Remove npages of mappings starting from va. va must be
 // page-aligned. The mappings must exist.
@@ -224,7 +242,8 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
       panic("uvmunmap: not mapped");
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
-    if(do_free){
+      // added a condition to make sure the shared memory is freed only once by the src process 
+    if(do_free && ((*pte & PTE_S) == 0)){
       uint64 pa = PTE2PA(*pte);
       kfree((void*)pa);
     }
