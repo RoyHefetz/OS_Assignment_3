@@ -22,7 +22,8 @@ int getpid(void);
 char* sbrk(int);
 int sleep(int);
 int uptime(void);
-
+char* map_shared_pages(char *addr, int size, int pid);
+int unmap_shared_pages(void *addr, int size);
 
 // ulib.c
 int stat(const char*, struct stat*);
@@ -40,5 +41,3 @@ void free(void*);
 int atoi(const char*);
 int memcmp(const void *, const void *, uint);
 void *memcpy(void *, const void *, uint);
-uint64 map_shared_pages(void *addr, int size, int pid);
-uint64 unmap_shared_pages(void *addr, int size);

@@ -217,9 +217,11 @@ unmap_shared_pages(struct proc* p, uint64 addr, uint64 size) {
       return -1; // either unmapped or not a shared mapping
   }
 
-  uvmunmap(p->pagetable, start_va, npages, 1);
+  uvmunmap(p->pagetable, start_va, npages, 0);
 
-  p->sz = start_va;
+  if (start_va + npages * PGSIZE == p->sz){
+    p->sz = start_va;
+  }
 
   return 0;
 }

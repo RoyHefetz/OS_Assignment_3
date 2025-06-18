@@ -1,74 +1,102 @@
 #include "kernel/types.h"
-#include "user/user.h"
 #include "kernel/stat.h"
-#include "fcntl.h"
-#include <string.h>
-#include <stdint.h> // Add this
+#include "user/user.h"
 
-#define PGSIZE 4096
 
-extern void* map_shared_pages(void *src_va, int src_pid, int length);
-extern int   unmap_shared_pages(void *addr,    int length);
+#define MAP_SIZE 4096
+
 
 int
 main(int argc, char *argv[])
 {
-    int skip_unmap = 0;
-    if (argc == 2 && strcmp(argv[1], "-skip") == 0)
-        skip_unmap = 1;
 
-    uintptr_t before_alloc = (uintptr_t)sbrk(0);
-    printf("Parent: initial break = %p\n", (void*)before_alloc);
+  int unmap_flag = 1;
+  unmap_flag = atoi(argv[1]);
+  char *shared = malloc(MAP_SIZE);
+  int parent_pid = getpid();
+  
+  int pid = fork();
 
-    char *buf = malloc(PGSIZE);
-    if (!buf) {
-        printf("Parent: malloc failed\n");
-        exit(1);
-    }
-    uintptr_t after_alloc = (uintptr_t)sbrk(0);
-    printf("Parent: after malloc(1 page) break = %p\n", (void*)after_alloc);
+  if (pid < 0) {
+    printf("fork failed\n");
+    exit(1);
+  }
 
-    int pid = fork();
-    if (pid < 0) {
-        printf("fork failed\n");
-        exit(1);
-    }
-
-    if (pid == 0) {
-        uintptr_t child_before = (uintptr_t)sbrk(0);
-        printf("Child[%d]: before map break = %p\n", getpid(), (void*)child_before);
-
-        void *shared = map_shared_pages(buf, getppid(), PGSIZE);
-        if (!shared) {
-            printf("Child: map_shared_pages failed\n");
-            exit(1);
-        }
-        uintptr_t child_after_map = (uintptr_t)sbrk(0);
-        printf("Child[%d]: after map break = %p\n", getpid(), (void*)child_after_map);
-
-        strcpy((char*)shared, "Hello daddy");
-
-        if (!skip_unmap) {
-            int ret = unmap_shared_pages(shared, PGSIZE);
-            printf("Child[%d]: unmap_shared_pages returned %d\n", getpid(), ret);
-            printf("Child[%d]: after unmap break = %p\n", getpid(), sbrk(0));
-        } else {
-            printf("Child[%d]: skipping unmap step\n", getpid());
-        }
-
-        char *tmp = malloc(16);
-        if (!tmp) {
-            printf("Child[%d]: second malloc failed\n", getpid());
-            exit(1);
-        }
-        printf("Child[%d]: after second malloc break = %p\n", getpid(), sbrk(0));
-
-        exit(0);
-    } else {
-        wait(0);
-        printf("Parent: read from buffer = \"%s\"\n", buf);
-        exit(0);
+  if (pid == 0) {
+    // ---------------------------
+    // CHILD PROCESS
+    // ---------------------------
+    char* sz_before = sbrk(0);
+    printf("shared in child: %p\n", shared);
+    printf("child: sz before mapping: %p\n", sz_before);
+    sleep(20);
+    char* mapped = map_shared_pages(shared, MAP_SIZE, parent_pid);
+    printf("mapped in child is: %p\n", mapped);
+    
+    if (!mapped) {
+      printf("parent: map_shared_pages failed\n");
+      kill(pid);
+      wait(0);
+      exit(1);
     }
 
-    return 0;
+    char* sz_after_mapping = sbrk(0);
+    printf("child: sz after mapping: %p\n", sz_after_mapping);
+
+    // Use the shared pointer (valid after mapping)
+    strcpy(mapped, "Hello daddy");
+
+    sleep(50);
+
+    if (unmap_flag) {
+      if (unmap_shared_pages(mapped, MAP_SIZE) < 0)
+        printf("child: unmap_shared_pages failed\n");
+      else
+        printf("child: unmapped shared memory\n");
+
+    } 
+    else {
+      printf("child: not unmapping memory (per flag)\n");
+    }
+
+    char* sz_after_unmap = sbrk(0);
+    void *tmp = malloc(MAP_SIZE*25);
+    char* sz_after_malloc = sbrk(0);
+    printf("child: sz after unmap: %p, after malloc: %p\n", sz_after_unmap, sz_after_malloc);
+
+    if (tmp) {
+      free(tmp);
+      printf("temp exists\n");
+    }
+
+    exit(0);
+  } 
+  
+  else {
+    sleep(10);
+    char* parent_sz_before = sbrk(0);
+    printf("parent size before: %p\n", parent_sz_before);
+
+    // ---------------------------
+    // PARENT PROCESS
+    // ---------------------------
+    // Allocate memory to share
+    if (!shared) {
+      printf("parent: malloc failed\n");
+      kill(pid);
+      wait(0);
+      exit(1);
+    }
+
+    sleep(40);
+    // Read message
+    printf("parent: read from shared memory: %s\n", shared);
+    printf("shared in parent is: %p\n", shared);
+
+
+    wait(0);
+    free(shared);
+  }
+
+  exit(0);
 }
