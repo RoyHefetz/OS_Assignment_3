@@ -177,11 +177,22 @@ uint64 map_shared_pages(struct proc* src_proc, struct proc* dst_proc, uint64 src
     uint64 dst_start = PGROUNDUP(dst_proc->sz);  // start from the end of dst address space
     uint64 dst_va = dst_start;
 
+    if((uint64)src_proc < (uint64)dst_proc) {
+      acquire(&src_proc->lock);
+      acquire(&dst_proc->lock);
+    }
+    else {
+      acquire(&dst_proc->lock);
+      acquire(&src_proc->lock);
+    }
+
     for (uint64 i = 0; i < num_pages; i++) {
         uint64 curr_src_va = src_start + i * PGSIZE;
         pte_t *pte = walk(src_proc->pagetable, curr_src_va, 0);
 
         if (!pte || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0) {
+            release(&src_proc->lock);
+            release(&dst_proc->lock);
             return 0;  // invalid page
         }
 
@@ -189,6 +200,8 @@ uint64 map_shared_pages(struct proc* src_proc, struct proc* dst_proc, uint64 src
         int flags = PTE_FLAGS(*pte) | PTE_S; // getting the src flags and adding the 'shared' flag to the existig ones
 
         if (mappages(dst_proc->pagetable, dst_va, PGSIZE, pa, flags) != 0) {
+            release(&src_proc->lock);
+            release(&dst_proc->lock);
             return 0;  // error mapping
         }
 
@@ -198,6 +211,9 @@ uint64 map_shared_pages(struct proc* src_proc, struct proc* dst_proc, uint64 src
     dst_proc->sz = dst_start + num_pages * PGSIZE;
 
     uint64 offset = src_va - src_start;
+    release(&src_proc->lock);
+    release(&dst_proc->lock);
+
     return dst_start + offset; // returns destination va with offset
 }
 
@@ -216,12 +232,15 @@ unmap_shared_pages(struct proc* p, uint64 addr, uint64 size) {
     if (!pte || (*pte & PTE_V) == 0 || (*pte & PTE_S) == 0)
       return -1; // either unmapped or not a shared mapping
   }
+  acquire(&p->lock);
 
   uvmunmap(p->pagetable, start_va, npages, 0);
 
   if (start_va + npages * PGSIZE == p->sz){
     p->sz = start_va;
   }
+
+  release(&p->lock);
 
   return 0;
 }

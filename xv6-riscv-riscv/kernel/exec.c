@@ -122,8 +122,10 @@ exec(char *path, char **argv)
     
   // Commit to the user image.
   oldpagetable = p->pagetable;
+  acquire(&p->lock);
   p->pagetable = pagetable;
   p->sz = sz;
+  release(&p->lock);
   p->trapframe->epc = elf.entry;  // initial program counter = main
   p->trapframe->sp = sp; // initial stack pointer
   proc_freepagetable(oldpagetable, oldsz);
